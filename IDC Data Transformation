@@ -1,0 +1,263 @@
+CREATE PROCEDURE [dbo].[IDCReport]
+AS
+BEGIN
+
+--rules: loop through the source daat and add new rows depending on the status of the machine for the first record
+--If start time is greater than 6am, insert new line above starting at 6
+--Then for each record:
+--If the finish time for machine is less than 6pm, insert a line below for that machine, finishing at 6pm
+--The aim is to have a full day's worth of rows that can be exported and the gaps completed
+
+declare @CurrentStartTime DATETIME
+declare @CurrentFinishTime DATETIME
+declare @PreviousStartTime DATETIME
+declare @PreviousFinishTime DATETIME
+declare @NewStartTime DATETIME
+declare @NewFinishTime DATETIME
+DECLARE @CurrentMachineName NVARCHAR(255)
+declare @PreviousMachineName NVARCHAR(255)
+DECLARE @RecordID int
+DECLARE @PreviousRecordID int
+DECLARE @MachineCount int
+
+declare @startHour int
+declare @finishHour int
+
+set @startHour = 6
+set @finishHour = 18
+
+declare @StartShift datetime
+declare @EndShift datetime
+
+set @MachineCount = 0
+
+set @StartShift = DATEADD(day, -1, CAST(GETDATE() AS date))
+set @EndShift = GETDATE()
+
+CREATE TABLE ##SourceFactoryResults
+(
+    PK int IDENTITY,
+    Logid int,
+    StartDateTime DATETIME,
+    FinishDateTime DATETIME,
+    Jobno varchar(32),
+    MachineName NVARCHAR(255),
+    Operation NVARCHAR(1000),
+    OperatorName NVARCHAR(64),
+    QuantityLogged int,
+    OperatorComments nvarchar(255),
+    CustomerName varchar(64),
+    EndCustomer varchar(64),
+    Product varchar(64),
+    QuantityOrdered float,
+    FinishedSizeWidth float,
+    FinishedSizeDepth float,
+    ColoursRev smallint,
+    JobValue float,
+    [EstimatedTime] decimal(8,2)
+)
+
+
+CREATE TABLE ##TargetFactoryResults
+(
+    PK int IDENTITY,
+    Logid int,
+    StartDateTime DATETIME,
+    FinishDateTime DATETIME,
+    Jobno varchar(32),
+    MachineName NVARCHAR(255),
+    Operation NVARCHAR(1000),
+    OperatorName NVARCHAR(64),
+    QuantityLogged int,
+    OperatorComments nvarchar(255),
+    CustomerName varchar(64),
+    EndCustomer varchar(64),
+    Product varchar(64),
+    QuantityOrdered float,
+    FinishedSizeWidth float,
+    FinishedSizeDepth float,
+    ColoursRev smallint,
+    JobValue float,
+    [EstimatedTime] decimal(8,2)
+)
+
+
+--Get source data from Thardata db
+
+insert into ##SourceFactoryResults(Logid,StartDateTime,FinishDateTime,Jobno,MachineName,Operation,OperatorName,
+QuantityLogged,OperatorComments,CustomerName,EndCustomer,Product,QuantityOrdered,FinishedSizeWidth,FinishedSizeDepth,ColoursRev,JobValue)
+(
+SELECT TSE.ID AS LogID,
+	tse.StartDateAndTime as StartDateTime, 
+	tse.SysDate as FinishhDateTime, TSE.JobNo, 
+    m.MachineName, --If a new machine is in operation, the details will need to be added to Gardners.dbo.MachineCode or it will not be included in these results
+    substring(TSE.OperationDesc, charindex('- ',TSE.OperationDesc) + len('- '), len(TSE.OperationDesc)) AS Operation, 
+    TSE.OperatorName, TSE.Quantity AS QuantityLogged, 
+    isnull(TSE.Comments, '') AS OperatorComments, 
+    MED.CustomerName, MED.Ref6 AS EndCustomer, 
+    MED.JobTypeDesc AS Product, MED.Quantity AS QuantityOrdered, 
+    PE.FinishedSizeWidth, PE.FinishedSizeDepth, JP.ColoursRev, MED.TotalTotal as JobValue
+
+FROM         thardata.dbo.TimeSheetEntries AS TSE INNER JOIN
+             thardata.dbo.MainEstimateDetails AS MED ON TSE.JobNo = MED.JobCreated INNER JOIN
+             thardata.dbo.JobOperation AS JO ON TSE.JobOperationID = JO.ID INNER JOIN
+             thardata.dbo.PaperEntries AS PE ON MED.EstimateHeaderRef = PE.EstimateHeaderRef INNER JOIN
+			       Gardners.dbo.MachineCodes$ AS M ON m.Code = tse.Operation INNER JOIN
+             thardata.dbo.JobPaper AS JP ON TSE.JobNo = JP.JobNo
+
+WHERE     (TSE.OperationDesc LIKE '%IDC%')
+AND PE.SectionName IN('Part 1') 
+AND tse.StartDateAndTime >= @StartShift AND tse.StartDateAndTime <= @EndShift
+GROUP BY TSE.ID, TSE.StartDateAndTime, TSE.SysDate, TSE.OperationLength, TSE.JobNo, m.MachineName, TSE.OperationDesc, TSE.OperatorName, TSE.Quantity, TSE.Comments, 
+                      MED.CustomerName, MED.Ref6, MED.JobTypeDesc, MED.Quantity, JO.ID, PE.FinishedSizeWidth, PE.FinishedSizeDepth, JP.ColoursRev, MED.TotalTotal
+
+
+)
+
+update ##SourceFactoryResults set EstimatedTime = 
+(select isnull( 
+    (select sum(OperationLength) as TotalTime
+    from thardata.dbo.TimeSheetEntries T
+    inner join Gardners.dbo.MachineCodes$ M on T.Operation = m.Code AND M.CodeType='Activity'
+    where t.JobNo = ##SourceFactoryResults.JobNo
+    and PostingType=1
+    and ##SourceFactoryResults.MachineName = m.MachineName
+    group by m.OperationType,PostingType, M.MachineName
+    ), '0'
+))
+
+select * from ##SourceFactoryResults
+order by MachineName,StartDateTime
+
+--Now loop through source data in machine order and look for gaps in start and finish times
+--Fill any gaps with placeholder rows in the target table, then add each machine row
+--thus generating a target table with a full set with a full set of rows for the whole day
+
+set @PreviousMachineName = ''
+
+DECLARE Ordered_Records CURSOR FAST_FORWARD FOR
+    SELECT PK FROM
+    ##SourceFactoryResults
+    order by MachineName, StartDateTime
+
+OPEN Ordered_Records
+FETCH NEXT FROM Ordered_Records INTO @RecordID
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    set @CurrentStartTime = (select StartDateTime from ##SourceFactoryResults where PK=@RecordID)
+    set @CurrentFinishTime = (select FinishDateTime from ##SourceFactoryResults where PK=@RecordID)
+    set @CurrentMachineName = (select MachineName from ##SourceFactoryResults where PK=@RecordID)
+    
+	print @CurrentMachineName
+	print @PreviousMachineName
+	print @MachineCount
+
+    if @CurrentMachineName <> @PreviousMachineName 
+    begin
+
+--For the last occurance of the last machine, insert row then check there is an end time at the shift end hour
+
+	  			if DATEPART(HOUR,@PreviousFinishTime) < @finishHour and DAY(@CurrentFinishTime) = DAY(@currentStartTime)
+				begin
+					set @NewStartTime = @PreviousFinishTime
+					set @NewFinishTime = CONVERT(date,@PreviousFinishTime)
+					set @NewFinishTime = DATEADD(hour,@finishHour,@NewFinishTime)
+					insert into ##TargetFactoryResults (StartDateTime,FinishDateTime,MachineName)
+						values (@NewStartTime,@NewFinishTime,@PreviousMachineName)
+
+--Then add a final entry taking it up to the start hour of the next day
+
+				set @NewStartTime = @NewFinishTime
+				set @NewFinishTime = DATEADD(hour,12,@NewFinishTime)
+				insert into ##TargetFactoryResults (StartDateTime,FinishDateTime,MachineName)
+						values (@NewStartTime,@NewFinishTime,@PreviousMachineName)
+
+				end
+
+--For the first occurance of the new machine, check the start hour
+				if DATEPART(HOUR,@CurrentFinishTime) > @startHour
+				begin
+				
+--If the machine has a finish time befor the hour, insert an entry starting at the start hour
+
+					set @NewStartTime = CONVERT(date,@CurrentFinishTime)
+					set @NewStartTime = DATEADD(HOUR,@startHour,@NewStartTime)
+					insert into ##TargetFactoryResults (StartDateTime,FinishDateTime,MachineName)
+					values (@NewStartTime,@CurrentStartTime,@CurrentMachineName)
+
+				end
+				
+				begin
+        
+--Insert the first record from source
+
+			insert into ##TargetFactoryResults(Logid,StartDateTime,FinishDateTime,Jobno,MachineName,Operation,OperatorName,
+				QuantityLogged,OperatorComments,CustomerName,EndCustomer,Product,QuantityOrdered,FinishedSizeWidth,FinishedSizeDepth,ColoursRev,JobValue)
+				(
+					select Logid,StartDateTime,FinishDateTime,Jobno,MachineName,Operation,OperatorName,
+					QuantityLogged,OperatorComments,CustomerName,EndCustomer,Product,QuantityOrdered,FinishedSizeWidth,FinishedSizeDepth,ColoursRev,JobValue
+					from ##SourceFactoryResults
+					WHERE PK=@RecordID
+				)
+				end
+		end
+
+		ELSE if @CurrentMachineName = @PreviousMachineName 
+    
+--The current mahcine name is the same as the last one, now check there are time slots for the whole day
+		
+    BEGIN
+			insert into ##TargetFactoryResults(Logid,StartDateTime,FinishDateTime,Jobno,MachineName,Operation,OperatorName,
+				QuantityLogged,OperatorComments,CustomerName,EndCustomer,Product,QuantityOrdered,FinishedSizeWidth,FinishedSizeDepth,ColoursRev,JobValue,EstimatedTime)
+				(
+					select Logid,StartDateTime,FinishDateTime,Jobno,MachineName,Operation,OperatorName,
+					QuantityLogged,OperatorComments,CustomerName,EndCustomer,Product,QuantityOrdered,FinishedSizeWidth,FinishedSizeDepth,ColoursRev,JobValue,EstimatedTime
+					from ##SourceFactoryResults
+					WHERE PK=@RecordID
+				)
+        
+--There is a 5 min gap between when this job started and the last one ended
+
+			if DATEDIFF(MINUTE,@PreviousFinishTime,@CurrentStartTime) > 5
+      
+      begin
+        SET @NewStartTime = @PreviousFinishTime
+				SET @NewFinishTime = @CurrentStartTime
+				insert into ##TargetFactoryResults (StartDateTime,FinishDateTime,MachineName)
+				values (@NewStartTime,@NewFinishTime,@CurrentMachineName)
+			end
+
+		END
+
+
+		set @PreviousMachineName = @CurrentMachineName
+		SET @PreviousStartTime = @CurrentStartTime
+		set @PreviousFinishTime = @CurrentFinishTime
+		set @PreviousRecordID = @RecordID
+
+
+		FETCH NEXT FROM Ordered_Records INTO @RecordID
+
+	end
+
+CLOSE Ordered_Records
+DEALLOCATE Ordered_Records
+
+--all temp tables edited to global temp tables 02/08/22. Global temp tables queried and closed in second s.proc for SSRS.
+--sql server job set to run this s.proc at 6am daily. SSRS set to exec IDCReport_clsTempTables at 6.05am daily.
+
+end
+GO
+
+Create procedure [dbo].[IDCReport_clsTempTables]
+AS
+BEGIN
+
+select * from ##TargetFactoryResults
+order by MachineName,StartDateTime
+drop table ##SourceFactoryResults
+drop table ##TargetFactoryResults
+
+END
+GO
