@@ -126,8 +126,8 @@ update ##SourceFactoryResults set EstimatedTime =
     ), '0'
 ))
 
-select * from ##SourceFactoryResults
-order by MachineName,StartDateTime
+
+
 
 --Now loop through source data in machine order and look for gaps in start and finish times
 --Fill any gaps with placeholder rows in the target table, then add each machine row
