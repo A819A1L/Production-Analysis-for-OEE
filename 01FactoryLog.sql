@@ -11,10 +11,10 @@ SELECT m.MachineName,    TSE.ID AS LogID,
                       MED.JobTypeDesc AS Product, MED.Quantity AS QuantityOrdered
 
 into #TempFactoryResults
-FROM         thardata.dbo.TimeSheetEntries AS TSE INNER JOIN
-             thardata.dbo.MainEstimateDetails AS MED ON TSE.JobNo = MED.JobCreated INNER JOIN
-             thardata.dbo.JobOperation AS JO ON TSE.JobOperationID = JO.ID inner join
-			 Gardners.dbo.MachineCodes$ M on m.Code = tse.Operation
+FROM         database1.dbo.TimeSheetEntries AS TSE INNER JOIN
+             database1.dbo.MainEstimateDetails AS MED ON TSE.JobNo = MED.JobCreated INNER JOIN
+             database1.dbo.JobOperation AS JO ON TSE.JobOperationID = JO.ID INNER JOIN
+	     database2.dbo.MachineCodes$ M on m.Code = tse.Operation
 
 WHERE     (TSE.OperationDesc LIKE '%IDC%')
 AND tse.StartDateAndTime >= @StartShift AND tse.StartDateAndTime <= @EndShift
@@ -26,8 +26,8 @@ add [EstimatedTime] decimal(8,2)
 
 update #TempFactoryResults set EstimatedTime = 
 (select sum(OperationLength) as TotalTime
-from thardata.dbo.TimeSheetEntries T
-inner join Gardners.dbo.MachineCodes$ M on T.Operation = m.Code AND M.CodeType='Activity'
+from database1.dbo.TimeSheetEntries T
+inner join database2.dbo.MachineCodes$ M on T.Operation = m.Code AND M.CodeType='Activity'
 where t.JobNo = #TempFactoryResults.JobNo
 and PostingType=1
 and #TempFactoryResults.MachineName = m.MachineName
