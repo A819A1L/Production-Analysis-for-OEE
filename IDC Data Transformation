@@ -98,12 +98,12 @@ SELECT TSE.ID AS LogID,
     MED.JobTypeDesc AS Product, MED.Quantity AS QuantityOrdered, 
     PE.FinishedSizeWidth, PE.FinishedSizeDepth, JP.ColoursRev, MED.TotalTotal as JobValue
 
-FROM         thardata.dbo.TimeSheetEntries AS TSE INNER JOIN
-             thardata.dbo.MainEstimateDetails AS MED ON TSE.JobNo = MED.JobCreated INNER JOIN
-             thardata.dbo.JobOperation AS JO ON TSE.JobOperationID = JO.ID INNER JOIN
-             thardata.dbo.PaperEntries AS PE ON MED.EstimateHeaderRef = PE.EstimateHeaderRef INNER JOIN
-			       Gardners.dbo.MachineCodes$ AS M ON m.Code = tse.Operation INNER JOIN
-             thardata.dbo.JobPaper AS JP ON TSE.JobNo = JP.JobNo
+FROM         database1.dbo.TimeSheetEntries AS TSE INNER JOIN
+             database1.dbo.MainEstimateDetails AS MED ON TSE.JobNo = MED.JobCreated INNER JOIN
+             database1.dbo.JobOperation AS JO ON TSE.JobOperationID = JO.ID INNER JOIN
+             database1.dbo.PaperEntries AS PE ON MED.EstimateHeaderRef = PE.EstimateHeaderRef INNER JOIN
+	     database2.dbo.MachineCodes$ AS M ON m.Code = tse.Operation INNER JOIN
+             database1.dbo.JobPaper AS JP ON TSE.JobNo = JP.JobNo
 
 WHERE     (TSE.OperationDesc LIKE '%IDC%')
 AND PE.SectionName IN('Part 1') 
@@ -117,8 +117,8 @@ GROUP BY TSE.ID, TSE.StartDateAndTime, TSE.SysDate, TSE.OperationLength, TSE.Job
 update ##SourceFactoryResults set EstimatedTime = 
 (select isnull( 
     (select sum(OperationLength) as TotalTime
-    from thardata.dbo.TimeSheetEntries T
-    inner join Gardners.dbo.MachineCodes$ M on T.Operation = m.Code AND M.CodeType='Activity'
+    from database1.dbo.TimeSheetEntries T
+    inner join database2.dbo.MachineCodes$ M on T.Operation = m.Code AND M.CodeType='Activity'
     where t.JobNo = ##SourceFactoryResults.JobNo
     and PostingType=1
     and ##SourceFactoryResults.MachineName = m.MachineName
@@ -205,7 +205,7 @@ BEGIN
 
 		ELSE if @CurrentMachineName = @PreviousMachineName 
     
---The current mahcine name is the same as the last one, now check there are time slots for the whole day
+--The current machine name is the same as the last one, now check there are time slots for the whole day
 		
     BEGIN
 			insert into ##TargetFactoryResults(Logid,StartDateTime,FinishDateTime,Jobno,MachineName,Operation,OperatorName,
