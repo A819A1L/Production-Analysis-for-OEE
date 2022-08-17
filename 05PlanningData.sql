@@ -1,4 +1,4 @@
-SELECT * FROM [Gardners].dbo.[PlanningData]
+SELECT * FROM [database2].dbo.[PlanningData]
 where StartOp >= '2022-01-19T06:00:00.000'
 	--cast(StartOp as date) = cast(getdate() as date) -- 'today' or getdate()-1 'yesterday'
 order by Name
