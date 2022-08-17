@@ -12,7 +12,7 @@ set @FileName = @FilePath + @FileName + '.csv'
 print @filename
 
 
-set @SQL = 'bcp "exec Gardners.dbo.SavePlanningDataToCSV" queryout ' + @FileName + ' -c -t, -T -S' + @@ServerName
+set @SQL = 'bcp "exec database2.dbo.SavePlanningDataToCSV" queryout ' + @FileName + ' -c -t, -T -S' + @@ServerName
 
 
 exec master..xp_cmdshell @sql
