@@ -21,7 +21,7 @@ BEGIN
 
 	SET NOCOUNT ON;
 
-		INSERT INTO [Gardners].[dbo].[PlanningData] 
+		INSERT INTO [data2].[dbo].[PlanningData] 
 				(
 					[ID],[JobID],[JobNo],[SectionID],[ResourceID],[Name],[Code],[StartOp],[EndOp],
 					[Duration],[MakeReadyElement],[Status],[Type],[QtyRequired],[OrigDuration],[EstimateID],
@@ -49,7 +49,7 @@ BEGIN
 				EstRunSpeed,
 				FinishedSize,
 				OrigCostCentre
-			FROM [thardata].[dbo].[JobOperation]
+			FROM [data1].[dbo].[JobOperation]
 			where Status = 2
 			and StartOp >= @FromDate and StartOp <= @Todate
 			)
